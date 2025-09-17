@@ -293,7 +293,6 @@ class DecoderTorchSDPA(nn.Module):
             attn_mask=mask,
             dropout_p=0.0,          # set >0 only during training
             is_causal=False,        # set True to get causal masking automatically
-            scale=self.temperature
         )
         return output
 
