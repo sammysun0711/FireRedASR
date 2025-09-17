@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-
+import math
 
 class TransformerDecoder(nn.Module):
     def __init__(
@@ -223,7 +223,8 @@ class DecoderMultiHeadAttention(nn.Module):
         self.w_vs = nn.Linear(d_model, n_head * self.d_k)
 
         self.attention = DecoderScaledDotProductAttention(
-            temperature=self.d_k ** 0.5)
+             temperature=self.d_k ** 0.5)
+        #self.attention = DecoderTorchSDPA(temperature=self.d_k ** 0.5)
         self.fc = nn.Linear(n_head * self.d_k, d_model)
         self.dropout = nn.Dropout(dropout)
 
@@ -266,6 +267,42 @@ class DecoderScaledDotProductAttention(nn.Module):
         output = torch.matmul(attn, v)
         return output
 
+
+class DecoderTorchSDPA(nn.Module):
+    def __init__(self, temperature):
+        super().__init__()
+        self.temperature = temperature
+
+    def forward(self, q, k, v, mask=None):
+        """
+        q, k, v: (batch, num_heads, seq_len, d_k)
+        mask: optional attention mask
+              - If boolean: shape (batch, 1, seq_len, seq_len) or broadcastable.
+                True means 'mask out'.
+              - If float: same shape, with -inf for masked positions.
+        """
+        d_k = q.size(-1)
+        if self.temperature != math.sqrt(d_k):
+            scale_factor = math.sqrt(d_k) / self.temperature
+            q = q * scale_factor
+
+        # Convert original mask {0,1} with 1=keep → boolean mask with True=mask
+        if mask is not None:
+            if mask.dtype != torch.bool:
+                mask = mask.eq(0)
+
+        # F.scaled_dot_product_attention will:
+        # - scale internally
+        # - apply softmax
+        # - apply mask if given
+        # - compute attention output
+        output = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=mask,
+            dropout_p=0.0,   # set >0 only during training
+            is_causal=False  # set True to get causal masking automatically
+        )
+        return output
 
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
