@@ -221,10 +221,8 @@ class DecoderMultiHeadAttention(nn.Module):
         self.w_qs = nn.Linear(d_model, n_head * self.d_k)
         self.w_ks = nn.Linear(d_model, n_head * self.d_k, bias=False)
         self.w_vs = nn.Linear(d_model, n_head * self.d_k)
-
-        self.attention = DecoderScaledDotProductAttention(
-             temperature=self.d_k ** 0.5)
-        #self.attention = DecoderTorchSDPA(temperature=self.d_k ** 0.5)
+        # self.attention = DecoderScaledDotProductAttention(temperature=self.d_k ** 0.5)
+        self.attention = DecoderTorchSDPA(temperature=self.d_k ** 0.5)
         self.fc = nn.Linear(n_head * self.d_k, d_model)
         self.dropout = nn.Dropout(dropout)
 
@@ -281,15 +279,9 @@ class DecoderTorchSDPA(nn.Module):
                 True means 'mask out'.
               - If float: same shape, with -inf for masked positions.
         """
-        d_k = q.size(-1)
-        if self.temperature != math.sqrt(d_k):
-            scale_factor = math.sqrt(d_k) / self.temperature
-            q = q * scale_factor
-
-        # Convert original mask {0,1} with 1=keep → boolean mask with True=mask
         if mask is not None:
             if mask.dtype != torch.bool:
-                mask = mask.eq(0)
+                mask = mask.eq(1)
 
         # F.scaled_dot_product_attention will:
         # - scale internally
@@ -299,8 +291,9 @@ class DecoderTorchSDPA(nn.Module):
         output = F.scaled_dot_product_attention(
             q, k, v,
             attn_mask=mask,
-            dropout_p=0.0,   # set >0 only during training
-            is_causal=False  # set True to get causal masking automatically
+            dropout_p=0.0,          # set >0 only during training
+            is_causal=False,        # set True to get causal masking automatically
+            scale=self.temperature
         )
         return output
 
