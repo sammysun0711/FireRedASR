@@ -1,3 +1,34 @@
+## FireRed ASR Optimization with ROCm
+1. Setup Environment
+```bash
+pip install -r requirements.txt
+```
+
+2. Build xFormers with ROCm
+```bash
+git clone https://github.com/ROCm/xformers.git
+cd xformers/
+git submodule update --init --recursive
+PYTORCH_ROCM_ARCH=gfx942 python setup.py install
+```
+
+3. Download [FireRedTeam/FireRedASR-AED-L](https://huggingface.co/FireRedTeam/FireRedASR-AED-L) to `pretrained_models` folder
+
+4. Run performance test with native MHA
+```python
+ATTENTION_BACKEND="NATIVE" python benchmark_firered_asr.py
+```
+
+5. Run performance test with MHA using torch SDPA
+```python
+ATTENTION_BACKEND="SDPA" python benchmark_firered_asr.py
+```
+
+6. Run performance test with MHA using xFormers
+```python
+ATTENTION_BACKEND="XFORMERS" python benchmark_firered_asr.py
+```
+
 <div align="center">
 <h1>FireRedASR: Open-Source Industrial-Grade
 <br>

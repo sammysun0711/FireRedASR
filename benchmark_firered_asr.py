@@ -8,6 +8,7 @@ import soundfile as sf
 import argparse
 import torch
 torch.serialization.add_safe_globals([argparse.Namespace])
+torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True
 
 from fireredasr.models.fireredasr import FireRedAsr
 
@@ -20,6 +21,7 @@ from torch.profiler import ProfilerActivity, record_function
 def load_model(model_path="pretrained_models/FireRedASR-AED-L"):
     print("==========Load model:========")
     model = FireRedAsr.from_pretrained("aed", model_path)
+    model.model.half()
     model.model.cuda()
     model.model.eval()
 
@@ -43,6 +45,7 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
     
     preprocess_start = time.time()
     feats, lengths, durs = model.feat_extractor(batch_wav_path)
+    feats = feats.half()
     feats, lengths = feats.cuda(), lengths.cuda()
     preprocess_dur = time.time() - preprocess_start
     print(f"preprocess_dur: {preprocess_dur:.3f} s")
@@ -74,7 +77,7 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
                     #with record_function("model.model.transcribe"):
                     hyps = model.model.transcribe(feats, lengths)
                 print(prof.key_averages().table(sort_by="cuda_time_total"))
-                prof.export_chrome_trace(f"firered_asr_profile_{batch}_with_stack_no_mem_sdpa_torch_compile.json")
+                prof.export_chrome_trace(f"firered_asr_profile_{batch}_xformers.json")
             else:
                 hyps = model.model.transcribe(feats, lengths)
         total_time += time.time() - start
@@ -91,16 +94,17 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
 
     avg_latency = total_time / trials
     rps = batch / avg_latency
-
-    print(results[0])
+    for res in results:
+        print(res)
     return rps
 
 if __name__ == "__main__":
-    audio_path = "out.wav"
+    audio_path = "out2.wav"
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_path = "pretrained_models/FireRedASR-AED-L"
     enable_profile = False
-    batch_sizes = [1, 8, 16, 32, 64, 128, 256]
+    #batch_sizes = [1, 8, 16, 32, 64, 128, 256]
+    batch_sizes = [1]
     model = load_model(model_path)
     
     if enable_profile:
