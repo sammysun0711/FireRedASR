@@ -15,7 +15,10 @@ from fireredasr.models.fireredasr import FireRedAsr
 from torch.profiler import profile as torch_profiler
 from torch.profiler import ProfilerActivity, record_function
 
-# import os
+import os
+
+ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "XFORMERS") # Option: "NATIVE", "SDPA", "XFORMERS"
+
 # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 def load_model(model_path="pretrained_models/FireRedASR-AED-L"):
@@ -77,7 +80,7 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
                     #with record_function("model.model.transcribe"):
                     hyps = model.model.transcribe(feats, lengths)
                 print(prof.key_averages().table(sort_by="cuda_time_total"))
-                prof.export_chrome_trace(f"firered_asr_profile_{batch}_xformers.json")
+                prof.export_chrome_trace(f"firered_asr_profile_{batch}_{ATTENTION_BACKEND}.json")
             else:
                 hyps = model.model.transcribe(feats, lengths)
         total_time += time.time() - start
@@ -103,7 +106,6 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model_path = "pretrained_models/FireRedASR-AED-L"
     enable_profile = False
-    #batch_sizes = [1, 8, 16, 32, 64, 128, 256]
     batch_sizes = [1]
     model = load_model(model_path)
     
