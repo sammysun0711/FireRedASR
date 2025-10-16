@@ -383,7 +383,7 @@ class DecoderMHAXFormers(nn.Module):
         return output
 
 
-@torch.compile(mode="reduce-overhead", backend="inductor")
+# @torch.compile(mode="reduce-overhead", backend="inductor")
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super().__init__()
@@ -397,7 +397,7 @@ class PositionwiseFeedForward(nn.Module):
         output = self.dropout(output)
         return output
 
-@torch.compile(mode="reduce-overhead", backend="inductor")
+# @torch.compile(mode="reduce-overhead", backend="inductor")
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super().__init__()
