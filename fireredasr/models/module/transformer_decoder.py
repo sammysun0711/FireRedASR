@@ -177,8 +177,29 @@ class TransformerDecoder(nn.Module):
         ys_lengths = torch.sum(torch.ne(ys, self.eos_id), dim=-1)
         return ys_lengths.int()
 
+#@torch.compile(mode="reduce-overhead", backend="inductor", fullgraph=True)
+class DecoderLayerFixed(nn.Module):
+    def __init__(self, cross_attn_norm, cross_attn, mlp_norm, mlp):
+        super().__init__()
+        self.cross_attn_norm = cross_attn_norm
+        self.cross_attn = cross_attn
+        self.mlp_norm = mlp_norm
+        self.mlp = mlp
 
+    def forward(self, x, enc_output, cross_attn_mask):
+        #x = residual + x
 
+        residual = x
+        x = self.cross_attn_norm(x)
+        x = self.cross_attn(x, enc_output, enc_output, mask=cross_attn_mask)
+        x = residual + x
+
+        residual = x
+        x = self.mlp_norm(x)
+        x = residual + self.mlp(x)
+        return x
+
+#@torch.compile(mode="reduce-overhead", backend="inductor", fullgraph=True)
 class DecoderLayer(nn.Module):
     def __init__(self, d_model, n_head, dropout):
         super().__init__()
@@ -199,6 +220,7 @@ class DecoderLayer(nn.Module):
 
         self.mlp_norm = nn.LayerNorm(d_model)
         self.mlp = PositionwiseFeedForward(d_model, d_model*4, dropout)
+        self.fixed = DecoderLayerFixed(self.cross_attn_norm, self.cross_attn, self.mlp_norm, self.mlp)
 
     def forward(self, dec_input, enc_output, self_attn_mask, cross_attn_mask,
                 cache=None):
@@ -212,16 +234,19 @@ class DecoderLayer(nn.Module):
         else:
             xq = x
         x = self.self_attn(xq, x, x, mask=self_attn_mask)
-        x = residual + x
+        if cache is not None:
+            x = self.fixed.forward(residual + x, enc_output, cross_attn_mask)
+        else:
+            x = residual + x
 
-        residual = x
-        x = self.cross_attn_norm(x)
-        x = self.cross_attn(x, enc_output, enc_output, mask=cross_attn_mask)
-        x = residual + x
+            residual = x
+            x = self.cross_attn_norm(x)
+            x = self.cross_attn(x, enc_output, enc_output, mask=cross_attn_mask)
+            x = residual + x
 
-        residual = x
-        x = self.mlp_norm(x)
-        x = residual + self.mlp(x)
+            residual = x
+            x = self.mlp_norm(x)
+            x = residual + self.mlp(x)
 
         if cache is not None:
             x = torch.cat([cache, x], dim=1)

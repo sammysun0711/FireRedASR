@@ -8,7 +8,7 @@ import soundfile as sf
 import argparse
 import torch
 torch.serialization.add_safe_globals([argparse.Namespace])
-torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True
+#torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True
 
 from fireredasr.models.fireredasr import FireRedAsr
 
@@ -55,6 +55,13 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
     
     total_dur = sum(durs)
     # print(total_dur)
+
+    for i in range(len(model.model.decoder.layer_stack)):
+        layer = model.model.decoder.layer_stack[i]
+        layer.fixed = torch.compile(layer.fixed,
+                              mode='reduce-overhead',
+                              fullgraph=True)
+
     # Warmup
     print("==========warmup========")
     for _ in range(warmpup):
