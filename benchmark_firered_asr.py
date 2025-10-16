@@ -8,7 +8,6 @@ import soundfile as sf
 import argparse
 import torch
 torch.serialization.add_safe_globals([argparse.Namespace])
-torch._inductor.config.triton.cudagraph_skip_dynamic_graphs=True
 
 from fireredasr.models.fireredasr import FireRedAsr
 
@@ -17,7 +16,7 @@ from torch.profiler import ProfilerActivity, record_function
 
 import os
 
-ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "XFORMERS") # Option: "NATIVE", "SDPA", "XFORMERS"
+ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "SDPA") # Option: "NATIVE", "SDPA"
 
 # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
@@ -38,14 +37,12 @@ def load_audio(wav_path):
         audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
     return audio
 
-#def benchmark(model, processor, wav_path, batch, chunk_len, warmpup=2, trials=10):
 def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False):
     batch_wav_path = [wav_path] * batch
     batch_uttid = list(range(batch))
     results = None
     total_dur = None
 
-    
     preprocess_start = time.time()
     feats, lengths, durs = model.feat_extractor(batch_wav_path)
     feats = feats.half()
@@ -54,7 +51,6 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
     print(f"preprocess_dur: {preprocess_dur:.3f} s")
     
     total_dur = sum(durs)
-    # print(total_dur)
     # Warmup
     print("==========warmup========")
     for _ in range(warmpup):
@@ -79,7 +75,6 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
                     record_shapes=True, 
                     with_stack=True,
                     profile_memory=False) as prof:
-                    #with record_function("model.model.transcribe"):
                     hyps = model.model.transcribe(feats, lengths)
                 print(prof.key_averages().table(sort_by="cuda_time_total"))
                 prof.export_chrome_trace(f"firered_asr_profile_{batch}_{ATTENTION_BACKEND}.json")

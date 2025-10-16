@@ -24,11 +24,6 @@ ATTENTION_BACKEND="NATIVE" python benchmark_firered_asr.py
 ATTENTION_BACKEND="SDPA" python benchmark_firered_asr.py
 ```
 
-6. Run performance test with MHA using xFormers
-```python
-ATTENTION_BACKEND="XFORMERS" python benchmark_firered_asr.py
-```
-
 <div align="center">
 <h1>FireRedASR: Open-Source Industrial-Grade
 <br>

@@ -8,10 +8,8 @@ import math
 import os
 import torch
 import torch.nn as nn
-import xformers.ops as xops
-import einops
 
-ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "XFORMERS") # Option: "NATIVE", "SDPA", "XFORMERS"
+ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "SDPA") # Option: "NATIVE", "SDPA"
 MultiHeadAttention = None
 print("ATTENTION_BACKEND: ", ATTENTION_BACKEND)
 
@@ -187,8 +185,6 @@ class DecoderLayer(nn.Module):
             MultiHeadAttention = DecoderMultiHeadAttention
         elif ATTENTION_BACKEND.upper() == "SDPA":
             MultiHeadAttention = DecoderMHATorchSDPA
-        elif ATTENTION_BACKEND.upper() == "XFORMERS":
-            MultiHeadAttention = DecoderMHAXFormers
         else:
             print("Unsupported attention backend: ", ATTENTION_BACKEND)
             exit(1)
@@ -347,43 +343,6 @@ class DecoderTorchSDPA(nn.Module):
         )
         return output
 
-# MHA with xFormers
-class DecoderMHAXFormers(nn.Module):
-    def __init__(self, d_model, n_head, dropout=0.1):
-        super().__init__()
-        assert d_model % n_head == 0
-        self.d_model = d_model
-        self.n_head = n_head
-        self.d_k = d_model // n_head
-
-        self.w_qs = nn.Linear(d_model, n_head * self.d_k)
-        self.w_ks = nn.Linear(d_model, n_head * self.d_k, bias=False)
-        self.w_vs = nn.Linear(d_model, n_head * self.d_k)
-
-        self.fc = nn.Linear(n_head * self.d_k, d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, q, k, v, mask=None):
-        bs = q.size(0)
-
-        # projection and transform to (batch*n_head, seq_len, head_dim)
-        q = self.w_qs(q).view(bs, -1, self.n_head, self.d_k).transpose(1, 2).reshape(bs * self.n_head, -1, self.d_k)
-        k = self.w_ks(k).view(bs, -1, self.n_head, self.d_k).transpose(1, 2).reshape(bs * self.n_head, -1, self.d_k)
-        v = self.w_vs(v).view(bs, -1, self.n_head, self.d_k).transpose(1, 2).reshape(bs * self.n_head, -1, self.d_k)
-        # single-step reshape+transpose
-        #q = einops.rearrange(self.w_qs(q), 'b s (h d) -> (b h) s d', h=self.n_head)
-        #k = einops.rearrange(self.w_ks(k), 'b s (h d) -> (b h) s d', h=self.n_head)
-        #v = einops.rearrange(self.w_vs(v), 'b s (h d) -> (b h) s d', h=self.n_head)
-        output = xops.memory_efficient_attention(q, k, v)
-        # back to (bs, seq_len, d_model)
-        output = output.reshape(bs, self.n_head, -1, self.d_k).transpose(1, 2).contiguous().view(bs, -1, self.d_model)
-        #output = einops.rearrange(output, '(b h) s d -> b s (h d)', b=bs, h=self.n_head)
-        output = self.fc(output)
-        output = self.dropout(output)
-        return output
-
-
-@torch.compile(mode="reduce-overhead", backend="inductor")
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super().__init__()
@@ -397,7 +356,6 @@ class PositionwiseFeedForward(nn.Module):
         output = self.dropout(output)
         return output
 
-@torch.compile(mode="reduce-overhead", backend="inductor")
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super().__init__()
