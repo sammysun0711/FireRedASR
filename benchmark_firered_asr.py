@@ -64,6 +64,8 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
     # Benchmark
     print("==========start benchmark========")
     total_time = 0
+    results = []
+    rtf_list = []
     if enable_profile: 
         warmup=1
         trials=1
@@ -87,19 +89,20 @@ def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False
         elapsed = time.time() - start
 
         rtf = elapsed / total_dur if total_dur > 0 else 0
-        results = []
         for uttid, wav, hyp in zip(batch_uttid, batch_wav_path, hyps):
             hyp = hyp[0]  # only return 1-best
             hyp_ids = [int(id) for id in hyp["yseq"].cpu()]
             text = model.tokenizer.detokenize(hyp_ids)
             results.append({"uttid": uttid, "text": text, "wav": wav,
                 "rtf": f"{rtf:.4f}"})
+        rtf_list.append(rtf)
 
     avg_latency = total_time / trials
     rps = batch / avg_latency
     for res in results:
         print(res)
-    return rps
+    avg_rtf = sum(rtf_list) / len(rtf_list)
+    return rps, avg_rtf
 
 if __name__ == "__main__":
     audio_path = "out2.wav"
@@ -110,9 +113,9 @@ if __name__ == "__main__":
     model = load_model(model_path)
     
     if enable_profile:
-        rps = benchmark(model, audio_path, batch=1, enable_profile=True)
+        rps, avg_rtf = benchmark(model, audio_path, batch=1, enable_profile=True)
     else:            
         for batch in batch_sizes:
             print(f"=============== batch size {batch} ==========================")
-            rps = benchmark(model, audio_path, batch=batch)
-            print(f"batch size: {batch}, average latency: {1.0/rps:.3f}s | RPS: {rps:.2f}")
+            rps, avg_rtf = benchmark(model, audio_path, batch=batch)
+            print(f"batch size: {batch}, average latency: {1.0/rps:.3f}s | RPS: {rps:.2f}, avg RTF: {avg_rtf:.3f}")
