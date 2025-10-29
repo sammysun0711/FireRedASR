@@ -223,6 +223,7 @@ class DecoderLayer(nn.Module):
 
         return x
 
+
 class DecoderMultiHeadAttention(nn.Module):
     def __init__(self, d_model, n_head, dropout=0.1):
         super().__init__()
@@ -273,6 +274,7 @@ class DecoderMultiHeadAttention(nn.Module):
 
         return output
 
+
 # Native SDPA
 class DecoderScaledDotProductAttention(nn.Module):
     def __init__(self, temperature):
@@ -291,6 +293,7 @@ class DecoderScaledDotProductAttention(nn.Module):
         output = torch.matmul(attn, v)
 
         return output
+
 
 # Torch SDPA
 class DecoderTorchSDPA(nn.Module):
