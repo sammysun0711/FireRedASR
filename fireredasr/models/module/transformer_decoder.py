@@ -242,7 +242,7 @@ class DecoderMultiHeadAttention(nn.Module):
             self.attention = DecoderTorchSDPA(temperature=self.d_k ** 0.5)
         # XFormers attention
         elif ATTENTION_BACKEND.upper() == "XFORMERS":
-            if not xformers_avaliabe:
+            if not xformers_available:
                 print("ATTENTION_BACKEND='XFORMERS' selected, but the xformers package is not available. Please install xformers")
                 exit(1)
             self.attention = DecoderXFormersAttention(self.n_head, self.d_k, self.d_model, temperature=self.d_k ** 0.5)
@@ -301,7 +301,7 @@ class DecoderTorchSDPA(nn.Module):
     def forward(self, q, k, v, mask=None):
         output = F.scaled_dot_product_attention(
             q, k, v,
-            scale=1 / self.temperature
+            scale = 1 / self.temperature
         )
 
         return output
