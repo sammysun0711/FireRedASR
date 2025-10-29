@@ -8,8 +8,13 @@ import math
 import os
 import torch
 import torch.nn as nn
-import xformers.ops as xops
-import einops
+
+try:
+    import xformers.ops as xops
+    xformers_available = True
+except Exception as e:
+    xformers_available = False
+    print("xformers is not available because: %s", str(e))
 
 ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "SDPA") # Option: "NATIVE", "SDPA", "XFORMERS"
 print("ATTENTION_BACKEND: ", ATTENTION_BACKEND)
@@ -237,6 +242,9 @@ class DecoderMultiHeadAttention(nn.Module):
             self.attention = DecoderTorchSDPA(temperature=self.d_k ** 0.5)
         # XFormers attention
         elif ATTENTION_BACKEND.upper() == "XFORMERS":
+            if not xformers_avaliabe:
+                print("ATTENTION_BACKEND='XFORMERS' selected, but the xformers package is not available. Please install xformers")
+                exit(1)
             self.attention = DecoderXFormersAttention(self.n_head, self.d_k, self.d_model, temperature=self.d_k ** 0.5)
         else:
             print("Unsupported attention backend: ", ATTENTION_BACKEND)
@@ -309,14 +317,14 @@ class DecoderXFormersAttention(nn.Module):
 
     def forward(self, q, k, v, mask=None):
         bs = q.size(0)
-
-        q = q.reshape(bs * self.n_head, -1, self.d_k)
-        k = k.reshape(bs * self.n_head, -1, self.d_k)
-        v = v.reshape(bs * self.n_head, -1, self.d_k)
+        dtype = q.dtype
+        q = q.reshape(bs * self.n_head, -1, self.d_k).half()
+        k = k.reshape(bs * self.n_head, -1, self.d_k).half()
+        v = v.reshape(bs * self.n_head, -1, self.d_k).half()
 
         output = xops.memory_efficient_attention(q, k, v)
         # back to (bs, seq_len, d_model)
-        output = output.reshape(bs, self.n_head, -1, self.d_k).transpose(1, 2).contiguous().view(bs, -1, self.d_model)
+        output = output.reshape(bs, self.n_head, -1, self.d_k).transpose(1, 2).contiguous().view(bs, -1, self.d_model).to(dtype)
 
         return output
 
