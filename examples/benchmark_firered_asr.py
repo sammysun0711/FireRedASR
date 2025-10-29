@@ -1,3 +1,4 @@
+import os
 import time
 import torch
 import numpy as np
@@ -13,11 +14,9 @@ from fireredasr.models.fireredasr import FireRedAsr
 from torch.profiler import profile as torch_profiler
 from torch.profiler import ProfilerActivity, record_function
 
-import os
 
 ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "XFORMERS") # Option: "NATIVE", "SDPA", "XFORMERS"
 
-# os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 def load_model(model_path="pretrained_models/FireRedASR-AED-L"):
     print("==========Load model:========")
@@ -36,23 +35,20 @@ def load_audio(wav_path):
         audio = librosa.resample(audio, orig_sr=sr, target_sr=16000)
     return audio
 
-#def benchmark(model, processor, wav_path, batch, chunk_len, warmpup=2, trials=10):
 def benchmark(model, wav_path, batch, warmpup=2, trials=10, enable_profile=False):
     batch_wav_path = [wav_path] * batch
     batch_uttid = list(range(batch))
     results = None
     total_dur = None
-
-    
+ 
     preprocess_start = time.time()
     feats, lengths, durs = model.feat_extractor(batch_wav_path)
     feats = feats.half()
     feats, lengths = feats.cuda(), lengths.cuda()
     preprocess_dur = time.time() - preprocess_start
     print(f"preprocess_dur: {preprocess_dur:.3f} s")
-    
     total_dur = sum(durs)
-    # print(total_dur)
+
     # Warmup
     print("==========warmup========")
     for _ in range(warmpup):

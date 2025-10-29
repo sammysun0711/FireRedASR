@@ -154,17 +154,17 @@ git submodule update --init --recursive
 PYTORCH_ROCM_ARCH=gfx942 python setup.py install
 ```
 
-4. Run performance test with native MHA
+3. Run performance test with native MHA (baseline)
 ```python
 ATTENTION_BACKEND="NATIVE" python example/benchmark_firered_asr.py
 ```
 
-5. Run performance test with MHA using torch SDPA
+4. Run performance test with MHA using torch SDPA
 ```python
 ATTENTION_BACKEND="SDPA" python example/benchmark_firered_asr.py
 ```
 
-6. Run performance test with MHA using xFormers
+5. Run performance test with MHA using xFormers
 ```python
 ATTENTION_BACKEND="XFORMERS" python example/benchmark_firered_asr.py
 ```
