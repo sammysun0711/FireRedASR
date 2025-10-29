@@ -11,8 +11,7 @@ import torch.nn as nn
 import xformers.ops as xops
 import einops
 
-ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "XFORMERS") # Option: "NATIVE", "SDPA", "XFORMERS"
-MultiHeadAttention = None
+ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "SDPA") # Option: "NATIVE", "SDPA", "XFORMERS"
 print("ATTENTION_BACKEND: ", ATTENTION_BACKEND)
 
 class TransformerDecoder(nn.Module):
@@ -183,19 +182,10 @@ class DecoderLayer(nn.Module):
     def __init__(self, d_model, n_head, dropout):
         super().__init__()
         self.self_attn_norm = nn.LayerNorm(d_model)
-        if ATTENTION_BACKEND.upper() == "NATIVE":
-            MultiHeadAttention = DecoderMultiHeadAttention
-        elif ATTENTION_BACKEND.upper() == "SDPA":
-            MultiHeadAttention = DecoderMHATorchSDPA
-        elif ATTENTION_BACKEND.upper() == "XFORMERS":
-            MultiHeadAttention = DecoderMHAXFormers
-        else:
-            print("Unsupported attention backend: ", ATTENTION_BACKEND)
-            exit(1)
-        self.self_attn = MultiHeadAttention(d_model, n_head, dropout)
+        self.self_attn = DecoderMultiHeadAttention(d_model, n_head, dropout)
 
         self.cross_attn_norm = nn.LayerNorm(d_model)
-        self.cross_attn = MultiHeadAttention(d_model, n_head, dropout)
+        self.cross_attn = DecoderMultiHeadAttention(d_model, n_head, dropout)
 
         self.mlp_norm = nn.LayerNorm(d_model)
         self.mlp = PositionwiseFeedForward(d_model, d_model*4, dropout)
@@ -228,7 +218,6 @@ class DecoderLayer(nn.Module):
 
         return x
 
-# Native MHA
 class DecoderMultiHeadAttention(nn.Module):
     def __init__(self, d_model, n_head, dropout=0.1):
         super().__init__()
@@ -239,7 +228,19 @@ class DecoderMultiHeadAttention(nn.Module):
         self.w_qs = nn.Linear(d_model, n_head * self.d_k)
         self.w_ks = nn.Linear(d_model, n_head * self.d_k, bias=False)
         self.w_vs = nn.Linear(d_model, n_head * self.d_k)
-        self.attention = DecoderScaledDotProductAttention(temperature=self.d_k ** 0.5)
+
+        # Native multi-head attention
+        if ATTENTION_BACKEND.upper() == "NATIVE":
+            self.attention = DecoderScaledDotProductAttention(temperature=self.d_k ** 0.5)
+        # Torch SDPA
+        elif ATTENTION_BACKEND.upper() == "SDPA":
+            self.attention = DecoderTorchSDPA(temperature=self.d_k ** 0.5)
+        # XFormers attention
+        elif ATTENTION_BACKEND.upper() == "XFORMERS":
+            self.attention = DecoderXFormersAttention(self.n_head, self.d_k, self.d_model, temperature=self.d_k ** 0.5)
+        else:
+            print("Unsupported attention backend: ", ATTENTION_BACKEND)
+            exit(1)
         self.fc = nn.Linear(n_head * self.d_k, d_model)
         self.dropout = nn.Dropout(dropout)
 
@@ -264,6 +265,7 @@ class DecoderMultiHeadAttention(nn.Module):
 
         return output
 
+# Native SDPA
 class DecoderScaledDotProductAttention(nn.Module):
     def __init__(self, temperature):
         super().__init__()
@@ -279,111 +281,46 @@ class DecoderScaledDotProductAttention(nn.Module):
         else:
             attn = torch.softmax(attn, dim=-1)
         output = torch.matmul(attn, v)
-        return output
-
-# MHA with Torch SDPA
-class DecoderMHATorchSDPA(nn.Module):
-    def __init__(self, d_model, n_head, dropout=0.1):
-        super().__init__()
-        self.d_model = d_model
-        self.n_head = n_head
-        self.d_k = d_model // n_head
-
-        self.w_qs = nn.Linear(d_model, n_head * self.d_k)
-        self.w_ks = nn.Linear(d_model, n_head * self.d_k, bias=False)
-        self.w_vs = nn.Linear(d_model, n_head * self.d_k)
-        self.attention = DecoderTorchSDPA(temperature=self.d_k ** 0.5)
-        self.fc = nn.Linear(n_head * self.d_k, d_model)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, q, k, v, mask=None):
-        bs = q.size(0)
-
-        q = self.w_qs(q).view(bs, -1, self.n_head, self.d_k)
-        k = self.w_ks(k).view(bs, -1, self.n_head, self.d_k)
-        v = self.w_vs(v).view(bs, -1, self.n_head, self.d_k)
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
-
-        if mask is not None:
-            mask = mask.unsqueeze(1)
-
-        output = self.attention(q, k, v, mask=mask)
-
-        output = output.transpose(1, 2).contiguous().view(bs, -1, self.d_model)
-        output = self.fc(output)
-        output = self.dropout(output)
 
         return output
 
+# Torch SDPA
 class DecoderTorchSDPA(nn.Module):
     def __init__(self, temperature):
         super().__init__()
         self.temperature = temperature
 
     def forward(self, q, k, v, mask=None):
-        """
-        q, k, v: (batch, num_heads, seq_len, d_k)
-        mask: optional attention mask
-              - If boolean: shape (batch, 1, seq_len, seq_len) or broadcastable.
-                True means 'mask out'.
-              - If float: same shape, with -inf for masked positions.
-        """
-        if mask is not None:
-            if mask.dtype != torch.bool:
-                mask = mask.eq(1)
-
-        # F.scaled_dot_product_attention will:
-        # - scale internally
-        # - apply softmax
-        # - apply mask if given
-        # - compute attention output
         output = F.scaled_dot_product_attention(
             q, k, v,
-            attn_mask=mask,
-            dropout_p=0.0,          # set >0 only during training
-            is_causal=False,        # set True to get causal masking automatically
+            scale=1 / self.temperature
         )
+
         return output
 
-# MHA with xFormers
-class DecoderMHAXFormers(nn.Module):
-    def __init__(self, d_model, n_head, dropout=0.1):
+# xFormers Attention
+class DecoderXFormersAttention(nn.Module):
+    def __init__(self, n_head, d_k, d_model, temperature):
         super().__init__()
-        assert d_model % n_head == 0
-        self.d_model = d_model
+        self.temperature = temperature
         self.n_head = n_head
-        self.d_k = d_model // n_head
-
-        self.w_qs = nn.Linear(d_model, n_head * self.d_k)
-        self.w_ks = nn.Linear(d_model, n_head * self.d_k, bias=False)
-        self.w_vs = nn.Linear(d_model, n_head * self.d_k)
-
-        self.fc = nn.Linear(n_head * self.d_k, d_model)
-        self.dropout = nn.Dropout(dropout)
+        self.d_k = d_k
+        self.d_model = d_model
 
     def forward(self, q, k, v, mask=None):
         bs = q.size(0)
 
-        # projection and transform to (batch*n_head, seq_len, head_dim)
-        q = self.w_qs(q).view(bs, -1, self.n_head, self.d_k).transpose(1, 2).reshape(bs * self.n_head, -1, self.d_k)
-        k = self.w_ks(k).view(bs, -1, self.n_head, self.d_k).transpose(1, 2).reshape(bs * self.n_head, -1, self.d_k)
-        v = self.w_vs(v).view(bs, -1, self.n_head, self.d_k).transpose(1, 2).reshape(bs * self.n_head, -1, self.d_k)
-        # single-step reshape+transpose
-        #q = einops.rearrange(self.w_qs(q), 'b s (h d) -> (b h) s d', h=self.n_head)
-        #k = einops.rearrange(self.w_ks(k), 'b s (h d) -> (b h) s d', h=self.n_head)
-        #v = einops.rearrange(self.w_vs(v), 'b s (h d) -> (b h) s d', h=self.n_head)
+        q = q.reshape(bs * self.n_head, -1, self.d_k)
+        k = k.reshape(bs * self.n_head, -1, self.d_k)
+        v = v.reshape(bs * self.n_head, -1, self.d_k)
+
         output = xops.memory_efficient_attention(q, k, v)
         # back to (bs, seq_len, d_model)
         output = output.reshape(bs, self.n_head, -1, self.d_k).transpose(1, 2).contiguous().view(bs, -1, self.d_model)
-        #output = einops.rearrange(output, '(b h) s d -> b s (h d)', b=bs, h=self.n_head)
-        output = self.fc(output)
-        output = self.dropout(output)
+
         return output
 
 
-# @torch.compile(mode="reduce-overhead", backend="inductor")
 class PositionwiseFeedForward(nn.Module):
     def __init__(self, d_model, d_ff, dropout=0.1):
         super().__init__()
@@ -397,7 +334,7 @@ class PositionwiseFeedForward(nn.Module):
         output = self.dropout(output)
         return output
 
-# @torch.compile(mode="reduce-overhead", backend="inductor")
+
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super().__init__()
