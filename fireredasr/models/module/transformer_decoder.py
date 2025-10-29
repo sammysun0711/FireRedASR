@@ -297,11 +297,12 @@ class DecoderTorchSDPA(nn.Module):
     def __init__(self, temperature):
         super().__init__()
         self.temperature = temperature
+        self.scale = 1 / self.temperature
 
     def forward(self, q, k, v, mask=None):
         output = F.scaled_dot_product_attention(
             q, k, v,
-            scale = 1 / self.temperature
+            scale = self.scale
         )
 
         return output
@@ -323,7 +324,7 @@ class DecoderXFormersAttention(nn.Module):
         v = v.reshape(bs * self.n_head, -1, self.d_k).half()
 
         output = xops.memory_efficient_attention(q, k, v)
-        # back to (bs, seq_len, d_model)
+        # reshape back to (bs, seq_len, d_model)
         output = output.reshape(bs, self.n_head, -1, self.d_k).transpose(1, 2).contiguous().view(bs, -1, self.d_model).to(dtype)
 
         return output
