@@ -77,17 +77,16 @@ if __name__ == "__main__":
     df = pd.read_csv(input_csv)
 
     # Get short paths for Chinese ('zh')
-    zh_short_paths = filter_short_paths_by_language(df, language_code)
+    filtered_short_paths = filter_short_paths_by_language(df, language_code)
 
-    print("Short paths with language == zh:")
+    print("Short paths with language == {language_code}:")
 
-    for path in zh_short_paths:
+    for path in filtered_short_paths:
         print(path)
     
     # Example usage
     native_deocder_updated_beam_search = wav_text_dict("ATTENTION_BACKEND_NATIVE_FP32_bs_32_output.json")
-    #sdpa_deocder_updated_beam_search = wav_text_dict("ATTENTION_BACKEND_SDPA_FP16_bs_32_output.json")
-    sdpa_deocder_updated_beam_search = wav_text_dict("ATTENTION_BACKEND_FLASH_ATTN_FP16_bs_32_output_c052a4f.json")
+    sdpa_deocder_updated_beam_search = wav_text_dict("ATTENTION_BACKEND_FLASH_ATTN_FP16_bs_32_output.json")
     
     count = 0
     
@@ -95,7 +94,7 @@ if __name__ == "__main__":
     filtered_sdpa_deocder_updated_beam_search = []
     for (native_wav_path, native_res), (sdpa_wav_path, sdpa_res) in zip(native_deocder_updated_beam_search.items(), sdpa_deocder_updated_beam_search.items()):
         if native_wav_path == sdpa_wav_path:
-            if os.path.basename(native_wav_path) in zh_short_paths and os.path.basename(sdpa_wav_path) in zh_short_paths:
+            if os.path.basename(native_wav_path) in filtered_short_paths and os.path.basename(sdpa_wav_path) in filtered_short_paths:
                 filtered_native_deocder_updated_beam_search.append(native_res)
                 filtered_sdpa_deocder_updated_beam_search.append(sdpa_res)
                 if native_res != sdpa_res:
@@ -125,7 +124,6 @@ if __name__ == "__main__":
     predictions = []
     references = []
     for ref, pred in zip(references_before_normalize, predictions_before_normalize):
-        language_code = "zh"
         norm = text_normalizers[language_code]
         pred = norm(pred)
         ref = norm(ref)

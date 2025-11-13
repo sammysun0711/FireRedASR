@@ -12,7 +12,7 @@ import torch
 from fireredasr.models.fireredasr import FireRedAsr
 
 from torch.profiler import profile as torch_profiler
-from torch.profiler import ProfilerActivity, record_function
+from torch.profiler import ProfilerActivity
 
 
 ATTENTION_BACKEND = os.environ.get("ATTENTION_BACKEND", "XFORMERS") # Option: "NATIVE", "SDPA", "XFORMERS"
@@ -92,16 +92,16 @@ def run(model, batch_wav_path, warmpup=2, trials=10, enable_profile=False, offse
 
     avg_latency = total_time / trials
     rps = batch / avg_latency
-    #Only print last result for debug purpose
-    #print("Only print last run results for debug purpose...")
-    #for res in results[-batch:]:
-    #    print(res)
+    # Only print last result for debug purpose
+    print("Only print last run results for debug purpose...")
+    for res in results[-batch:]:
+        print(res)
     avg_rtf = sum(rtf_list) / len(rtf_list)
     print(f"Finished benchmark test for batch size: {len(batch_wav_path)}, average latency: {avg_latency:.3f}s | RPS: {rps:.2f}, avg RTF: {avg_rtf:.3f}")
 
     return rps, avg_latency, avg_rtf, avg_audio_dur_per_sample, results[-batch:]
 
-def benchmark(model, audio_dir, batch, warmpup=2, trials=10, enable_profile=False,):
+def benchmark(model, audio_dir, batch, warmpup=2, trials=10, enable_profile=False):
     # Get list of .wav files (case-insensitive)
     batch_wav_path = []
 
@@ -130,7 +130,6 @@ def benchmark(model, audio_dir, batch, warmpup=2, trials=10, enable_profile=Fals
     benchmark_results = []
     e2e_start = time.time()
     for start in range(0, dataset_size - dataset_size % batch, batch):
-        #batch_wav_path, dur = file_durations[start:start+batch]
         batch_wav_path = [path for path, _ in file_durations[start:start + batch]]
         print(f"Processing {batch} batched data from index {start} to {start + batch-1}")
         rps, avg_latency, avg_rtf, avg_audio_dur_per_sample, model_results = run(model, batch_wav_path, warmpup, trials, enable_profile, offset=start)
@@ -140,7 +139,6 @@ def benchmark(model, audio_dir, batch, warmpup=2, trials=10, enable_profile=Fals
     remainder = dataset_size % batch
     if remainder:
         start+=batch
-        #last_batch_wav_path = file_durations[-remainder:]
         last_batch_wav_path = [path for path, _ in file_durations[-remainder:]]
         print(f"Processing {remainder} remaining data : {last_batch_wav_path}")
         rps, avg_latency, avg_rtf, avg_audio_dur_per_sample, model_results = run(model, last_batch_wav_path, warmpup, trials, enable_profile, offset=start)
@@ -165,15 +163,12 @@ if __name__ == "__main__":
     model = load_model(model_path)
     
     if enable_profile:
-        #rps, avg_rtf, avg_latency = benchmark(model, audio_dir, batch=1, enable_profile=True)
         benchmark_results, e2e_duration = benchmark(model, audio_dir, batch=1, enable_profile=enable_profile)
     else:            
         for batch in batch_sizes:
             print(f"*************************** batch size {batch} ***************************")
-            #rps, avg_latency, avg_rtf = benchmark(model, audio_dir, batch=batch)
             benchmark_results, e2e_duration = benchmark(model, audio_dir, batch=batch, enable_profile=enable_profile)
 
-            #print(f"batch size: {batch}, average latency: {avg_latency:.3f}s | RPS: {rps:.2f}, avg RTF: {avg_rtf:.3f}")
             print(f"\nbatch size: {batch}, e2e latency: {e2e_duration} s")
             save_results = []
             save_path = f"ATTENTION_BACKEND_{ATTENTION_BACKEND}_bs_{batch}_output.json"
@@ -183,10 +178,10 @@ if __name__ == "__main__":
             for res in benchmark_results:
                 print(f"batch size: {res[0]}, avg audio duration per sample: {res[1]:.3f} s, avg inference latency {res[2]:.3f} s | RPS: {res[3]:.2f}, avg RTF: {res[4]:.3f}")
             with open(save_path, "w", encoding="utf-8") as final:
-                json.dump(save_results, 
-                          final, 
+                json.dump(save_results,
+                          final,
                           indent=2,
-                          ensure_ascii=False,  # Keep non-ASCII characters intact 
+                          ensure_ascii=False,  # Keep non-ASCII characters intact
                           default=lambda x: list(x) if isinstance(x, tuple) else str(x)
                           )
-            print(f"Data written to {save_path}")
+            print(f"Performance results written to {save_path}")
